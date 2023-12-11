@@ -24,7 +24,6 @@ import unicodedata
 from urllib.parse import urlparse
 import shlex
 
-
 basestring = str
 file = io.FileIO
 
@@ -75,7 +74,23 @@ class Viewer:
         os.unsetenv('LINES')
         os.unsetenv('COLUMNS')
         self.scr = args[0]
+
+        color_list = (
+            (curses.COLOR_WHITE, curses.COLOR_YELLOW),
+            (curses.COLOR_WHITE, curses.COLOR_RED),
+            (curses.COLOR_WHITE, curses.COLOR_GREEN),
+            (curses.COLOR_WHITE, curses.COLOR_CYAN),
+            (curses.COLOR_WHITE, curses.COLOR_BLUE),
+            (curses.COLOR_WHITE, curses.COLOR_MAGENTA),
+        )
+        self.select_color = False
+        self.colorlut = dict()
+        for index, (fg, bg) in enumerate(color_list, 1):
+            curses.init_pair(index, fg, bg)
+            self.colorlut[index] = curses.color_pair(index)
+
         self.data = [[str(j) for j in i] for i in args[1]]
+        self.cellcolor = dict()
         self.info = kwargs.get('info')
         self.header_offset_orig = 3
         self.header = self.data[0]
@@ -246,6 +261,13 @@ class Viewer:
 
     def mark(self):
         self.save_y, self.save_x = self.y + self.win_y, self.x + self.win_x
+
+    def toggle_assign_color(self):
+        self.select_color = not self.select_color
+
+    def handle_set_color(self, color_index):
+        self.cellcolor[self.y + self.win_y, self.x + self.win_x] = self.colorlut.get(color_index, 0)
+        self.display()
 
     def goto_mark(self):
         if hasattr(self, 'save_y'):
@@ -705,6 +727,7 @@ class Viewer:
                      KEY_CTRL('e'): self.line_end,
                      KEY_CTRL('l'): self.scr.redrawwin,
                      KEY_CTRL('g'): self.show_info,
+                     '.': self.toggle_assign_color,
                      }
 
     def run(self):
@@ -719,9 +742,16 @@ class Viewer:
 
         """
         c = self.scr.getch()  # Get a keystroke
+
         if c == curses.KEY_RESIZE:
             self.resize()
             return
+
+        if self.select_color and (ord('0') <= c <= ord('9')):
+            index = c - ord('0')
+            self.handle_set_color(index)
+            return
+
         if 0 < c < 256:
             c = chr(c)
         # Digits are commands without a modifier
@@ -835,6 +865,7 @@ class Viewer:
         # Adds the current cell content after the 'current cell' display
         wc = self.max_x - len(info) - 2
         s = self.cellstr(yp, xp, wc)
+
         addstr(self.scr, "  " + s, curses.A_NORMAL)
 
         # Print a divider line
@@ -857,9 +888,9 @@ class Viewer:
             self.scr.clrtoeol()
             for x in range(0, self.vis_columns):
                 if x == self.x and y == self.y:
-                    attr = curses.A_REVERSE
+                    attr = curses.A_REVERSE | self.cellcolor.get((y + self.win_y, x + self.win_x), 0)
                 else:
-                    attr = curses.A_NORMAL
+                    attr = curses.A_BOLD | self.cellcolor.get((y + self.win_y, x + self.win_x), 0)
                 xc, wc = self.column_xw(x)
                 s = self.cellstr(y + self.win_y, x + self.win_x, wc)
                 if yc == self.max_y - 1 and x == self.vis_columns - 1:
